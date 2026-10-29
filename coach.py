@@ -501,12 +501,13 @@ class Coach:
         if self.session.phase != 'active':
             return
         facts = '; '.join(f'{LABELS[k]}：{self.session.current(k) or "未知"}' for k in LABELS)
+        icon_text = ', '.join(f'{key}={entry["name"]}' for key, entry in self.session.fresh_icons().items()) or '未知'
         text = (f'本局采样 {self.session.counts["captures"]} 次 | OCR {self.session.counts["ocr"]} 次'
                 f' | AI {self.session.counts["model"]}/{self.max_requests()} 次\n'
                 f'当前信息：{facts}\n\n'
                 f'本地提示：{offline_hint(self.session)}\n\n'
                 f'AI 最近建议：{self.session.last_decision or "未请求（本地 OCR 模式）"}\n\n'
-                f'本地图标：{", ".join(f"{k}={v["name"]}" for k, v in self.session.fresh_icons().items()) or "未知"}\n'
+                f'本地图标：{icon_text}\n'
                 f'OCR 可见文字（不保证准确）：\n{self.session.latest_ocr[:1800] or "暂无可识别文字"}')
         self.show_output(text)
 
