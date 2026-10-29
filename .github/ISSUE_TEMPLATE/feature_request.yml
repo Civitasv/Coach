@@ -1,0 +1,29 @@
+name: Feature request / Spec proposal
+description: Define the user outcome and acceptance criteria before implementation.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User outcome and scenario
+      description: What should Coach help the player do, and when?
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: List objectively verifiable outcomes; a material feature needs a numbered Spec PR.
+    validations:
+      required: true
+  - type: textarea
+    id: unknowns
+    attributes:
+      label: Unknowns / sample evidence
+      description: Missing game evidence, UI version, screenshots (sanitized only), or dependencies.
+  - type: textarea
+    id: risks
+    attributes:
+      label: Privacy, latency, and cost risks
+      description: Especially local/cloud boundary, API cost, and stale match facts.
