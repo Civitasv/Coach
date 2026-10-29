@@ -9,6 +9,10 @@ Coach is a **local-first, read-only, real-time gameplay adviser** for 王者万�
 3. Check the latest state of the target branch and any open PR; never rely on stale conversation assumptions.
 4. Produce a concise change plan with affected boundaries and acceptance criteria before coding. A small bug fix may use the PR plan section instead of a separate plan file.
 
+## Engineering skill
+
+Read `.agents/skills/ub-mode/SKILL.md` for `ub-mode` engineering practices on nontrivial code changes. It provides a locally maintained adapter to the upstream skill. Follow the repository PR/CI gates for merges and never treat unavailable crapper/dryer/mutator tooling as passing.
+
 ## AI-native change protocol
 
 **Explore → Specify → Plan → Implement → Validate → Review → PR → Merge.**
