@@ -1,4 +1,4 @@
-# Coach v0.3 — 王者万象棋孙尚香本地实时教练
+# Coach v0.4 — 王者万象棋孙尚香本地实时教练
 
 只读 Windows 屏幕辅助。**本地 RapidOCR 高频识别 + 低频 AI 文字决策 + 可选按次看图**。不读取游戏进程、不抓包、不自动操作游戏，也不保证推荐正确。
 
@@ -51,3 +51,13 @@ tests/         不依赖实际 OCR 模型的单元测试
 ## AI-native development workflow
 
 For AI agents and human contributors, start with [`AGENTS.md`](AGENTS.md), then [`docs/architecture/overview.md`](docs/architecture/overview.md) and [`docs/process/development.md`](docs/process/development.md). Features use versioned [Specs](docs/specs/) and [Plans](docs/plans/), with evidence-backed reviews and the PR template. GitHub Actions validates both Windows and Linux; local commands are in the development guide. Changes to game-state recognition should begin with [`Spec 002`](docs/specs/002-structured-game-observation.md) (draft, not implemented).
+
+## Spec 002 — 结构化观察（第一阶段）
+
+在选择整个游戏窗口后，可通过「校准区域」分别框选并保存 **health / energy / round / shop / pool / enemy_board / weapon**，以及单个英雄图标 `shop_slot_1…5` 或 `enemy_icon`。这些 ROI 按相对坐标保存到本机 `config/calibration.json`，对不同尺寸的相同 UI 布局可复用。切换布局需要重新校准，校准期间观察会暂停。
+
+高置信度 OCR 读数现在带来源、观察时间和过期时间，互相冲突的读数不会自动获胜；程序会询问用户。对于单个无文字英雄图标，先框选一个 `shop_slot` 或 `enemy_icon`，确认图标实际所属英雄后点击「保存图标样本」。PNG 模板仅保存在本地 `config/icon_templates/`，模板匹配不充分会返回未知。**不等于完整的对手阵容识别，也不能据此精确计算公共牌库。**
+
+基准测量：按 `fixtures/README.md` 手动准备经过脱敏并有真实标签的截图，然后 `python scripts/benchmark_observation.py fixtures/manifest.json`。没有图片样本时返回 `pending_dataset`，绝不把模拟测试数字当成真实游戏识别率。
+
+工程 Skill：仓库里的 `.agents/skills/ub-mode/SKILL.md` 是兼容 Coach PR/CI 规则的本地适配器。原始 `unclebob/ub-mode` Skill 可通过 `python scripts/install_ub_mode.py --yes` **主动安装到个人** `~/.agents/skills/ub-mode/`，此命令会从锁定提交下载文件；它不在 CI 或程序运行中自动执行。

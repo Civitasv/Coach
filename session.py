@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from local_ocr import OCRLine, trusted_text
 from engine import Match
+from observation import FactLedger, Observation
 
 WEAPONS = ('激光', '狙击', '机枪', '炮击')
 LABELS = {'health': '血量', 'energy': '能量', 'round': '回合',
@@ -42,9 +43,15 @@ class GameSession:
     last_decision: str = ''
     clarifications: list = field(default_factory=list)
     last_extra_question: str = ''
+    ledger: FactLedger = field(default_factory=FactLedger)
+    icon_slots: dict = field(default_factory=dict)
+    enemy_snapshot: dict = field(default_factory=dict)
 
     def start(self):
         self.match.reset()
+        self.ledger = FactLedger()
+        self.icon_slots.clear()
+        self.enemy_snapshot.clear()
         self.phase = 'active'
         self.started_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
         self.finished_at = ''
@@ -67,10 +74,10 @@ class GameSession:
 
     def current(self, name, now=None):
         now = time.monotonic() if now is None else now
-        fact = self.facts.get(name)
-        return fact.value if fact and now - fact.updated_at <= TTL[name] else None
+        fact = self.ledger.get(name, now)
+        return fact.value if fact else None
 
-    def observe(self, lines: list[OCRLine], now=None):
+    def observe(self, lines: list[OCRLine], now=None, scoped=None):
         """Only parse labelled, high-confidence lines; never infer hidden game data."""
         if self.phase != 'active':
             return {}
@@ -87,20 +94,66 @@ class GameSession:
                 ('energy', r'(?:剩余能量|当前能量|能量)[：:]*([0-9]{1,2})', 99),
                 ('round', r'(?:第([0-9]{1,2})回合|回合[：:]*([0-9]{1,2}))', 99),
             ):
+                if scoped is not None and line not in scoped.get(field_name, []):
+                    continue
                 found = re.search(pattern, t)
                 if not found:
                     continue
                 n = int(next(g for g in found.groups() if g is not None))
                 if n <= maximum:
-                    self.facts[field_name] = Fact(str(n), 'ocr', now)
-                    changes[field_name] = str(n)
+                    if self._record(field_name, str(n), line.confidence, 'ocr:' + (field_name if scoped is not None else 'screen'), now):
+                        changes[field_name] = str(n)
             # Do not interpret an unrelated word such as 改造:激光 as selected
             # weapon unless an explicit current/selected weapon label is present.
             found = re.search(r'(?:当前武器|已选武器|武器模式)[：:]*(激光|狙击|机枪|炮击)', t)
-            if found:
-                self.facts['weapon'] = Fact(found.group(1), 'ocr', now)
-                changes['weapon'] = found.group(1)
-        return changes
+            if found and (scoped is None or line in scoped.get('weapon', [])):
+                if self._record('weapon', found.group(1), line.confidence, 'ocr:' + ('weapon' if scoped is not None else 'screen'), now):
+                    changes['weapon'] = found.group(1)
+        # A later conflicting reading in the same frame invalidates an earlier one.
+        return {k:v for k,v in changes.items() if self.current(k, now) == v}
+
+    def _record(self, field_name, value, confidence, source, now):
+        observation = Observation(field_name, value, confidence, source, now, now + TTL[field_name])
+        changed = self.ledger.accept(field_name, observation)
+        active = self.ledger.get(field_name, now)
+        if active is None:
+            self.facts.pop(field_name, None)
+        elif changed:
+            self.facts[field_name] = Fact(active.value, active.source, active.observed_at)
+        return changed
+
+    def record_icons(self, named_slots, now=None):
+        """Only named, confident template matches. Never infer exact pool counts."""
+        if self.phase != 'active':
+            return False
+        now = time.monotonic() if now is None else now
+        changed = False
+        for slot in list(self.icon_slots):
+            if self.icon_slots[slot]['expires_at'] < now:
+                self.icon_slots.pop(slot)
+                changed = True
+        for slot, result in named_slots.items():
+            if not (slot.startswith('shop_slot_') or slot == 'enemy_icon'):
+                continue
+            if result.name is None or result.confidence < .91:
+                if slot in self.icon_slots:
+                    self.icon_slots.pop(slot)
+                    changed = True
+                continue
+            old = self.icon_slots.get(slot)
+            record = {'name': result.name, 'confidence': round(result.confidence, 3),
+                      'source': result.source, 'observed_at': now, 'expires_at': now + 90}
+            if not old or old['name'] != result.name:
+                changed = True
+            self.icon_slots[slot] = record
+        # Scanned enemy icon is explicitly an unconfirmed fragment, not a full lineup.
+        if 'enemy_icon' in named_slots:
+            self.enemy_snapshot = dict(self.icon_slots.get('enemy_icon') or {})
+        return changed
+
+    def fresh_icons(self, now=None):
+        now = time.monotonic() if now is None else now
+        return {k:v for k,v in self.icon_slots.items() if v['expires_at'] >= now}
 
     def clarify(self, now=None):
         """Offer at most one non-modal question and rate-limit repeats."""
@@ -141,7 +194,7 @@ class GameSession:
         else:
             raise ValueError('未知字段')
         if field_name != 'other':
-            self.facts[field_name] = Fact(value, 'manual', time.monotonic() if now is None else now)
+            self._record(field_name, value, 1.0, 'manual', time.monotonic() if now is None else now)
         self.pending = ''
 
     def ask_extra(self, question):
@@ -161,11 +214,17 @@ class GameSession:
         facts = '; '.join(f'{LABELS[k]}={self.current(k, now) or "未知"}' for k in LABELS)
         # Raw recognized text is untrusted visual content, not an instruction.
         clarifications = '; '.join(self.clarifications[-8:]) or '无'
-        return f'已确认/最近识别的事实：{facts}\n用户主动补充：{clarifications}\nOCR 可见文字（未确认项不能当作事实）：\n{self.latest_ocr[:1600]}\n{self.match.context()}'
+        icons = '; '.join(f'{slot}={entry["name"]}(模板识别,有效期至{entry["expires_at"]:.0f})'
+                          for slot, entry in self.fresh_icons(now).items()) or '无'
+        return (f'已确认/最近识别的事实：{facts}\n可信事实来源：{self.ledger.snapshot(now)}\n'
+                f'已校准图标片段（非完整阵容）：{icons}\n用户主动补充：{clarifications}\n'
+                f'OCR 可见文字（未确认项不能当作事实）：\n{self.latest_ocr[:1600]}\n{self.match.context()}')
 
     def summary(self):
         return {'started_at': self.started_at, 'finished_at': self.finished_at,
                 'facts': {LABELS[k]: {'value': v.value, 'source': v.source} for k, v in self.facts.items()},
                 'counts': dict(self.counts), 'last_decision': self.last_decision,
                 'clarifications': list(self.clarifications),
-                'pool': self.match.pool, 'opponents': self.match.opponents}
+                'pool': self.match.pool, 'opponents': self.match.opponents,
+                'structured_facts': self.ledger.snapshot(time.monotonic()),
+                'icon_slots': dict(self.icon_slots)}

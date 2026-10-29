@@ -11,7 +11,7 @@ import time
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, simpledialog
 
 import mss
 from PIL import Image, ImageChops, ImageStat, ImageTk
@@ -19,6 +19,8 @@ from PIL import Image, ImageChops, ImageStat, ImageTk
 from advice import offline_hint, text_prompt
 from engine import parse, prompt, short
 from local_ocr import LocalOCR, trusted_text
+from observation import Calibration, ROI, ROI_NAMES, scoped_lines
+from icon_matcher import IconMatcher
 from providers import analyze, analyze_text
 from session import GameSession, LABELS
 
@@ -51,11 +53,12 @@ def changed(image, old):
 
 
 class Picker(tk.Toplevel):
-    def __init__(self, master, monitor, callback):
+    def __init__(self, master, monitor, callback, min_size=(100, 70)):
         super().__init__(master)
         self.title('拖拽选择游戏区域 · Esc 取消')
         self.callback = callback
         self.monitor = monitor
+        self.min_size = min_size
         shot = grab(monitor)
         self.factor = min(1, 1250 / shot.width, 720 / shot.height)
         w, h = round(shot.width * self.factor), round(shot.height * self.factor)
@@ -85,7 +88,7 @@ class Picker(tk.Toplevel):
         ax, ay = self.anchor
         x1, x2 = sorted((max(0, ax), max(0, e.x)))
         y1, y2 = sorted((max(0, ay), max(0, e.y)))
-        if x2-x1 < 100 or y2-y1 < 70:
+        if x2-x1 < self.min_size[0] or y2-y1 < self.min_size[1]:
             messagebox.showwarning('区域过小', '请框选更大的游戏区域', parent=self)
             return
         self.callback({'left': self.monitor['left'] + round(x1/self.factor),
@@ -98,7 +101,7 @@ class Picker(tk.Toplevel):
 class Coach:
     def __init__(self, root):
         self.root = root
-        root.title('Coach · 孙尚香本地实时教练 v0.3')
+        root.title('Coach · 孙尚香本地实时教练 v0.4')
         root.geometry('610x825')
         root.attributes('-topmost', True)
         self.session = GameSession()
@@ -111,6 +114,13 @@ class Coach:
         self.last_text_at = 0.0
         self.cloud_text_allowed = False
         self.rect = None
+        self.config_dir = Path(__file__).resolve().parent / 'config'
+        self.calibration_file = self.config_dir / 'calibration.json'
+        try:
+            self.calibration = Calibration.load(self.calibration_file) if self.calibration_file.exists() else Calibration()
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self.calibration = Calibration()
+        self.roi_name = tk.StringVar(value='health')
         self.monitors = []
         self.last_photo = None
         self.question_field = ''
@@ -143,6 +153,15 @@ class Coach:
         ttk.Button(row, text='刷新显示器', command=self.refresh_monitors).pack(side='left', padx=6)
         self.region_label = ttk.Label(row, text='未框选')
         self.region_label.pack(side='left', padx=5)
+        roi_row = ttk.Frame(f); roi_row.pack(fill='x', pady=3)
+        ttk.Label(roi_row, text='校准区域').pack(side='left')
+        ttk.Combobox(roi_row, textvariable=self.roi_name, values=sorted(ROI_NAMES),
+                     state='readonly', width=16).pack(side='left', padx=4)
+        ttk.Button(roi_row, text='框选并保存 ROI', command=self.pick_roi).pack(side='left')
+        ttk.Button(roi_row, text='清除该 ROI', command=self.remove_roi).pack(side='left', padx=3)
+        ttk.Button(roi_row, text='保存图标样本', command=self.save_icon_template).pack(side='left')
+        self.roi_status = ttk.Label(f, text=self.roi_description(), wraplength=550)
+        self.roi_status.pack(anchor='w')
 
         box = ttk.LabelFrame(f, text='对局控制（每局必须手动开始、结束）', padding=7)
         box.pack(fill='x', pady=6)
@@ -228,6 +247,71 @@ class Coach:
         self.region_label.config(text=f'{box["width"]}×{box["height"]}')
         self.status.set('区域已更新；观察暂停时可点击继续')
 
+    def roi_description(self):
+        return '已校准：' + (', '.join(sorted(self.calibration.regions)) or '无；未校准字段使用保守全屏 OCR')
+
+    def pick_roi(self):
+        if not self.rect:
+            messagebox.showwarning('先选游戏区域', '先框选游戏窗口，再校准内部区域')
+            return
+        if self.monitoring:
+            self.pause_observer()
+        name = self.roi_name.get()
+        Picker(self.root, self.rect, lambda selection: self.set_roi(name, selection), min_size=(10, 10))
+
+    def set_roi(self, name, selection):
+        if name not in ROI_NAMES or not self.rect:
+            return
+        game = self.rect
+        try:
+            roi = ROI((selection['left'] - game['left']) / game['width'],
+                      (selection['top'] - game['top']) / game['height'],
+                      selection['width'] / game['width'], selection['height'] / game['height'])
+            self.calibration.regions[name] = roi
+            self.calibration.save(self.calibration_file)
+        except (OSError, ValueError) as exc:
+            self.status.set('ROI 保存失败：' + str(exc)[:150])
+            return
+        self.roi_status.config(text=self.roi_description())
+        self.status.set('本地 ROI 已保存；恢复观察后生效')
+
+    def remove_roi(self):
+        if self.monitoring:
+            self.pause_observer()
+        self.calibration.regions.pop(self.roi_name.get(), None)
+        self.calibration.save(self.calibration_file)
+        self.roi_status.config(text=self.roi_description())
+        self.status.set('该 ROI 已清除')
+
+    def save_icon_template(self):
+        name = self.roi_name.get()
+        if not self.rect or (not name.startswith('shop_slot_') and name != 'enemy_icon'):
+            messagebox.showwarning('需要图标区域', '先校准 shop_slot_1…5 或 enemy_icon')
+            return
+        roi = self.calibration.regions.get(name)
+        if not roi:
+            messagebox.showwarning('未校准', '先框选并保存对应图标区域')
+            return
+        hero = simpledialog.askstring('保存本地图标样本', '请输入可确认的英雄名称（保存为本机 PNG 模板）', parent=self.root)
+        if not hero:
+            return
+        import re
+        if not re.fullmatch(r'[\w\u4e00-\u9fff-]{1,30}', hero):
+            messagebox.showwarning('名称无效', '仅允许中文、字母、数字、下划线和短横线')
+            return
+        output = self.config_dir / 'icon_templates' / f'{hero}.png'
+        if output.exists() and not messagebox.askyesno('覆盖模板', f'{hero} 的本地模板已存在，覆盖？'):
+            return
+        if self.monitoring:
+            self.pause_observer()
+        try:
+            img = grab(self.rect)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            img.crop(roi.pixels(*img.size)).save(output)
+            self.status.set(f'已在本机保存图标模板：{hero}；恢复观察后生效')
+        except (OSError, ValueError) as exc:
+            self.status.set('图标模板保存失败：' + str(exc)[:150])
+
     def provider_changed(self, *_):
         self.cloud_text_allowed = False
         self.auto_text.set(False)
@@ -312,13 +396,15 @@ class Coach:
         rect = self.rect.copy()
         sample = self.number(self.sample_interval.get(), 0.5, 0.4, 5.0)
         ocr_gap = self.number(self.ocr_interval.get(), 1.5, 0.6, 30.0)
+        calibration = Calibration(dict(self.calibration.regions))
         threading.Thread(target=self.observe_worker,
-                         args=(current_id, event, rect, sample, ocr_gap), daemon=True).start()
+                         args=(current_id, event, rect, sample, ocr_gap, calibration), daemon=True).start()
         self.status.set('本地 OCR 观察中；采样不产生 API 费用')
 
-    def observe_worker(self, run_id, stopped, rect, sample, ocr_gap):
+    def observe_worker(self, run_id, stopped, rect, sample, ocr_gap, calibration):
         try:
             engine = LocalOCR()
+            matcher = IconMatcher.from_directory(self.config_dir / 'icon_templates')
             thumb = None
             next_ocr = 0.0
             refresh_at = 0.0
@@ -332,7 +418,18 @@ class Coach:
                     # CPU OCR is synchronous within this single worker: there can
                     # never be overlapping OCR calls for this session worker.
                     lines = engine.recognize(image)
-                    self.events.put((run_id, 'ocr', (image, lines)))
+                    scoped = scoped_lines(lines, calibration, *image.size) if calibration.regions else None
+                    if scoped is not None:
+                        for key in ('health', 'energy', 'round', 'weapon'):
+                            scoped.setdefault(key, lines)
+                    icon_results = {}
+                    for name, roi in calibration.regions.items():
+                        if name.startswith('shop_slot_') or name == 'enemy_icon':
+                            try:
+                                icon_results[name] = matcher.classify(image.crop(roi.pixels(*image.size)))
+                            except ValueError:
+                                continue
+                    self.events.put((run_id, 'ocr', (image, lines, scoped, icon_results)))
                     next_ocr = time.monotonic() + ocr_gap
                     refresh_at = time.monotonic() + 8.0
                 stopped.wait(max(0, sample - (time.monotonic() - start)))
@@ -404,11 +501,13 @@ class Coach:
         if self.session.phase != 'active':
             return
         facts = '; '.join(f'{LABELS[k]}：{self.session.current(k) or "未知"}' for k in LABELS)
+        icon_text = ', '.join(f'{key}={entry["name"]}' for key, entry in self.session.fresh_icons().items()) or '未知'
         text = (f'本局采样 {self.session.counts["captures"]} 次 | OCR {self.session.counts["ocr"]} 次'
                 f' | AI {self.session.counts["model"]}/{self.max_requests()} 次\n'
                 f'当前信息：{facts}\n\n'
                 f'本地提示：{offline_hint(self.session)}\n\n'
                 f'AI 最近建议：{self.session.last_decision or "未请求（本地 OCR 模式）"}\n\n'
+                f'本地图标：{icon_text}\n'
                 f'OCR 可见文字（不保证准确）：\n{self.session.latest_ocr[:1800] or "暂无可识别文字"}')
         self.show_output(text)
 
@@ -418,13 +517,17 @@ class Coach:
         if self.session.phase != 'active' or self.session.counts['model'] >= self.max_requests():
             return
         latest = self.session.latest_ocr
-        if len(latest.strip()) < 5 or latest == self.last_text_sent:
+        fingerprint = (latest + '\n' + str(sorted((k, v['name']) for k,v in self.session.fresh_icons().items()))
+                       + '\n' + str(sorted((k, self.session.current(k)) for k in LABELS)))
+        if len(latest.strip()) < 5 and not self.session.fresh_icons():
+            return
+        if fingerprint == self.last_text_sent:
             return
         now = time.monotonic()
         if now - self.last_text_at < self.number(self.text_interval.get(), 12, 10, 120):
             return
         self.last_text_at = now
-        self.last_text_sent = latest
+        self.last_text_sent = fingerprint
         self.launch_model('text')
 
     def vision_once(self):
@@ -486,8 +589,9 @@ class Coach:
                     self.status.set('本地观察失败：' + data[:230])
                     continue
                 if kind == 'ocr':
-                    image, lines = data
-                    self.session.observe(lines)
+                    image, lines, scoped, icon_results = data
+                    self.session.observe(lines, scoped=scoped)
+                    self.session.record_icons(icon_results)
                     if self.session.pending and self.session.current(self.session.pending) is not None:
                         self.session.skip_question()
                         self.question_field = ''

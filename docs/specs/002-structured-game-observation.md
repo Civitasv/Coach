@@ -1,6 +1,6 @@
 # Spec 002 — Structured game-state observation (draft)
 
-**Status:** Draft / not implemented  
+**Status:** In progress — ROI / evidence / local icon template slice implemented; real-client data and full enemy tracking pending  
 **Goal:** Convert local OCR + icon recognition into verifiable, actionable game state without fabricating absent data.
 
 ## Problem
@@ -23,3 +23,16 @@ Sanitized golden-image fixtures, negative/unknown icon samples, TTL and conflict
 ## Non-goals
 
 Reading hidden game state, automated gameplay actions, defeating anti-cheat, or claiming exact remaining inventory from observed opponents alone.
+
+## Implementation mapping (first slice)
+
+| AC | Implemented artifact | Outstanding evidence |
+| --- | --- | --- |
+| AC-001 | `Calibration`/`ROI`, Tk screen-region picker, opt-in `config/calibration.json` | Real display/resolution calibration walkthrough |
+| AC-002 | `Observation` / `FactLedger`, conflict handling, session fact projection | Capture-driven error audit |
+| AC-003 | `IconMatcher`, user-confirmed local PNG templates, unknown abstention | Real UI icon dataset and precision |
+| AC-004 | Existing `Match.apply` panel guard retained; icon observations cannot write exact public pool | Manual correction UI for individual pool cards |
+| AC-005 | Time-bounded icon fragments and dynamic AI-text fingerprint; `Match.opponents` full lineup remains vision-confirmed | Full opponent identity tracking across views |
+| AC-006 | Offline benchmark script and test manifest format, with explicit `pending_dataset` | Sanitized game capture measurements on Windows |
+
+The first implementation slice is **not** proof that the full Spec 002 or practical real-time lineup recognition is complete.

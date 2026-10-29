@@ -53,6 +53,13 @@ class LocalOCR:
         # RapidOCR accepts Pillow Images directly; scale down overlarge desktop crops
         # to reduce CPU use. No screenshots are transmitted over the network here.
         image = image.copy().convert('RGB')
+        original_w, original_h = image.size
         if image.width > 1600 or image.height > 1100:
             image.thumbnail((1600, 1100))
-        return lines_from_result(self.engine(image))
+        lines = lines_from_result(self.engine(image))
+        if image.size == (original_w, original_h):
+            return lines
+        from dataclasses import replace
+        scale_x, scale_y = original_w / image.width, original_h / image.height
+        return [replace(line, box=tuple((round(x * scale_x), round(y * scale_y))
+                                         for x, y in line.box)) if line.box else line for line in lines]

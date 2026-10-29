@@ -46,3 +46,11 @@ Manual opt-in image LLM → confirmed screenshot analysis
 - Per-match metrics for OCR success, inference latency, model calls, and stale-data incidents.
 
 Every change affecting fact contracts, network privacy, session epochs, or decision behavior requires a spec and regression tests.
+
+## Spec 002 structured observation slice
+
+- `observation.py` is the pure ROI/FactLedger boundary: normalized ROIs, schema validation, atomic local config, TTL facts and conflict invalidation. No game/network/Tk APIs.
+- `local_ocr.py` restores OCR boxes to original game-crop coordinates after image downscaling. `scoped_lines` assigns those boxes to calibrated regions. If a HUD ROI has not been calibrated, current conservative full-crop label matching remains as fallback.
+- `icon_matcher.py` performs single-icon crop matching only against human-confirmed local templates. Strong score and runner-up margin required; ambiguous output is unknown. Output is a time-limited fragment, not a reconstructed lineup.
+- `coach.py` captures a calibration snapshot when the per-game read-only observer starts, then posts OCR+matched-icon results to the Tk event queue. UI thread alone mutates session state; pause/end invalidates late events as before.
+- Benchmark harness consumes privately held, sanitized labeled game captures. The absence of captures is never recorded as real-world passing evidence.

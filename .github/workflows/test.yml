@@ -33,7 +33,7 @@ jobs:
       - name: Verify AI workflow artifacts
         run: python scripts/verify_ai_workflow.py
       - name: Compile application and tests
-        run: python -m compileall -q coach.py engine.py local_ocr.py session.py advice.py providers.py scripts tests
+        run: python -m compileall -q coach.py engine.py local_ocr.py session.py advice.py providers.py observation.py icon_matcher.py scripts tests
       - name: Run unit and regression tests
         run: python -m unittest discover -s tests -v
       - name: Dependency consistency
