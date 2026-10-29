@@ -43,3 +43,31 @@ def analyze(provider, image, prompt, model, key=''):
               'image_url':'data:image/jpeg;base64,'+b64,'detail':'high'}]}]}, key)
         return '\n'.join(b['text'] for item in data.get('output',[]) for b in item.get('content',[]) if b.get('type')=='output_text')
     raise ValueError('不支持的提供商')
+
+
+def analyze_text(provider, prompt, model, key=''):
+    """Text-only strategic reasoning using OCR; no screenshot in request."""
+    if not model.strip():
+        raise ValueError('模型名称不能为空')
+    if provider == 'Ollama 本地':
+        data = request('http://127.0.0.1:11434/api/chat', {
+            'model': model, 'stream': False, 'format': 'json',
+            'messages': [{'role': 'system', 'content': SYSTEM},
+                         {'role': 'user', 'content': prompt}]})
+        return data['message']['content']
+    if not key.strip():
+        raise ValueError('请提供 API Key')
+    if provider == 'DeepSeek 云端':
+        data = request('https://api.deepseek.com/chat/completions', {
+            'model': model, 'thinking': {'type': 'disabled'}, 'max_tokens': 800,
+            'messages': [{'role': 'system', 'content': SYSTEM},
+                         {'role': 'user', 'content': prompt}]}, key)
+        return data['choices'][0]['message']['content']
+    if provider == 'OpenAI 云端':
+        data = request('https://api.openai.com/v1/responses', {
+            'model': model, 'store': False, 'max_output_tokens': 800,
+            'instructions': SYSTEM,
+            'input': [{'role': 'user', 'content': prompt}]}, key)
+        return '\n'.join(b['text'] for item in data.get('output', [])
+                         for b in item.get('content', []) if b.get('type') == 'output_text')
+    raise ValueError('不支持的提供商')
