@@ -1,0 +1,28 @@
+name: Bug report
+description: Reproducible behavior or privacy/state regression.
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: Actual behavior and reproduction
+      description: Include exact steps, operating system, version, game scene and expected outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / relevant Spec
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Safe diagnostic evidence
+      description: Logs, traces, sanitized screenshot if necessary. Never paste API keys or account information.
+  - type: textarea
+    id: risk
+    attributes:
+      label: Scope / regression risk
+      description: In particular screenshot transmission, lifecycle, stale results or exact inventory state.

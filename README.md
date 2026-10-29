@@ -47,3 +47,7 @@ engine.py      牌库、对手历史快照
 providers.py   可选图像/文本模型接口
 tests/         不依赖实际 OCR 模型的单元测试
 ```
+
+## AI-native development workflow
+
+For AI agents and human contributors, start with [`AGENTS.md`](AGENTS.md), then [`docs/architecture/overview.md`](docs/architecture/overview.md) and [`docs/process/development.md`](docs/process/development.md). Features use versioned [Specs](docs/specs/) and [Plans](docs/plans/), with evidence-backed reviews and the PR template. GitHub Actions validates both Windows and Linux; local commands are in the development guide. Changes to game-state recognition should begin with [`Spec 002`](docs/specs/002-structured-game-observation.md) (draft, not implemented).
