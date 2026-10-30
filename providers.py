@@ -14,8 +14,24 @@ def request(url, payload, token=None):
     try:
         with urllib.request.urlopen(req, timeout=90) as r:
             return json.load(r)
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
-        raise RuntimeError(f'模型调用失败：{e}') from e
+    except urllib.error.HTTPError as exc:
+        # Preserve provider error messages (invalid model, auth, insufficient
+        # balance, rate limit); HTTP 400 alone is not actionable to a player.
+        detail = ''
+        try:
+            body = exc.read(4096).decode('utf-8', errors='replace')
+            data = json.loads(body)
+            error = data.get('error', {})
+            detail = error.get('message', '') if isinstance(error, dict) else ''
+            if not detail:
+                detail = body[:260]
+        except (OSError, ValueError, TypeError):
+            pass
+        if token:
+            detail = detail.replace(token, '[REDACTED]')
+        raise RuntimeError(f'模型 HTTP {exc.code}：{str(detail)[:260] or exc.reason}') from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError(f'模型网络连接失败：{exc}') from exc
 
 
 def analyze(provider, image, prompt, model, key=''):

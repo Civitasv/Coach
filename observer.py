@@ -10,6 +10,7 @@ import time
 
 import mss
 from PIL import Image, ImageChops, ImageStat
+from dataclasses import replace
 
 from icon_matcher import IconMatcher
 from local_ocr import LocalOCR
@@ -55,6 +56,7 @@ class Observer:
         self._frame = None
         self._frame_seq = 0
         self.thread = None
+        self.ocr_failures = 0
 
     def start(self):
         if self.thread is not None:
@@ -83,9 +85,15 @@ class Observer:
             self.events.put_nowait((kind, payload))
 
     def _run(self):
+        """Capture must survive unavailable or failed local OCR.
+
+        Initialization/downloads can be slow; a failed OCR call must not blank
+        the preview or make the UI silently stop receiving frames.
+        """
         try:
-            ocr = self.ocr_factory()
             matcher = IconMatcher.from_directory(self.templates_dir)
+            ocr = None
+            retry_at = 0.0
             previous = None
             next_ocr = refresh_at = 0.0
             while not self.stop_event.is_set():
@@ -96,21 +104,54 @@ class Observer:
                     self._frame = image
                     self._frame_seq += 1
                 if started >= next_ocr and (different or started >= refresh_at):
-                    lines = ocr.recognize(image)
-                    scoped = scoped_lines(lines, self.calibration, *image.size) if self.calibration.regions else None
-                    if scoped is not None:
-                        for name in ('health', 'energy', 'round', 'weapon'):
-                            scoped.setdefault(name, lines)
-                    icons = {}
-                    for name, roi in self.calibration.regions.items():
-                        if name.startswith('shop_slot_') or name == 'enemy_icon':
-                            try:
-                                icons[name] = matcher.classify(image.crop(roi.pixels(*image.size)))
-                            except ValueError:
-                                pass
-                    self._event('ocr', (lines, scoped, icons))
+                    try:
+                        if ocr is None and started >= retry_at:
+                            self._event('ocr_status', 'Initializing local OCR...')
+                            ocr = self.ocr_factory()
+                            self.ocr_failures = 0
+                        if ocr is not None:
+                            lines = ocr.recognize(image)
+                            scoped = scoped_lines(lines, self.calibration, *image.size) if self.calibration.regions else None
+                            if scoped is not None:
+                                # Small HUD numerals can vanish when full-screen images
+                                # are resized for OCR. Re-read only calibrated tiny ROIs.
+                                for name in ('health', 'energy', 'round', 'weapon'):
+                                    roi = self.calibration.regions.get(name)
+                                    if roi is None:
+                                        continue
+                                    box = roi.pixels(*image.size)
+                                    crop = image.crop(box)
+                                    if crop.width < 20 or crop.height < 12:
+                                        continue
+                                    scale = 2 if crop.height < 120 else 1
+                                    if scale > 1:
+                                        crop = crop.resize((crop.width*scale, crop.height*scale))
+                                    small_lines = ocr.recognize(crop)
+                                    adjusted = []
+                                    for line in small_lines:
+                                        box_points = tuple((round(x/scale)+box[0], round(y/scale)+box[1])
+                                                           for x,y in line.box) if line.box else ()
+                                        adjusted.append(replace(line, box=box_points))
+                                    scoped[name] = adjusted
+                                    lines.extend(adjusted)
+                            icons = {}
+                            for name, roi in self.calibration.regions.items():
+                                if name.startswith('shop_slot_') or name == 'enemy_icon':
+                                    try:
+                                        icons[name] = matcher.classify(image.crop(roi.pixels(*image.size)))
+                                    except ValueError:
+                                        pass
+                            self._event('ocr', (lines, scoped, icons))
+                            self.ocr_failures = 0
+                    except Exception as exc:
+                        self.ocr_failures += 1
+                        self._event('ocr_error', f'{type(exc).__name__}: {str(exc)[:180]}')
+                        # Recreate OCR after a failed invocation, throttled to avoid
+                        # an expensive tight loop or repeated model downloads.
+                        ocr = None
+                        retry_at = time.monotonic() + 20.
                     next_ocr = time.monotonic() + self.ocr_interval
                     refresh_at = time.monotonic() + 8.
                 self.stop_event.wait(max(0., self.sample_interval - (time.monotonic() - started)))
         except Exception as exc:
-            self._event('error', str(exc))
+            self._event('error', f'{type(exc).__name__}: {exc}')

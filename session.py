@@ -109,6 +109,23 @@ class GameSession:
             if found and (scoped is None or line in scoped.get('weapon', [])):
                 if self._record('weapon', found.group(1), line.confidence, 'ocr:' + ('weapon' if scoped is not None else 'screen'), now):
                     changes['weapon'] = found.group(1)
+        # A user-calibrated HUD area may contain ONLY the numeric value, with
+        # no "血量/能量/回合" label. Admit one clear numeric token per exact ROI.
+        # No ROI -> never guess unlabelled numbers from the whole screenshot.
+        if scoped is not None:
+            for field_name, max_value in (('health', 999), ('energy', 99), ('round', 99)):
+                if field_name not in scoped or field_name in changes:
+                    continue
+                candidates = [line for line in scoped[field_name]
+                              if line.confidence >= 0.90
+                              and re.fullmatch(r'[0-9]{1,3}', line.text.strip())]
+                distinct = {int(line.text.strip()) for line in candidates
+                            if int(line.text.strip()) <= max_value}
+                if len(distinct) == 1 and len(candidates) == 1:
+                    value = str(next(iter(distinct)))
+                    if self._record(field_name, value, candidates[0].confidence,
+                                    'ocr:calibrated_' + field_name, now):
+                        changes[field_name] = value
         # A later conflicting reading in the same frame invalidates an earlier one.
         return {k:v for k,v in changes.items() if self.current(k, now) == v}
 
