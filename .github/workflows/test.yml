@@ -1,26 +1,24 @@
 name: CI
-
 on:
   push:
     branches: [master]
   pull_request:
-
 permissions:
   contents: read
-
 concurrency:
   group: coach-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   validate:
     name: Python 3.11 / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,8 +31,8 @@ jobs:
       - name: Verify AI workflow artifacts
         run: python scripts/verify_ai_workflow.py
       - name: Compile application and tests
-        run: python -m compileall -q coach.py engine.py local_ocr.py session.py advice.py providers.py observation.py icon_matcher.py scripts tests
-      - name: Run unit and regression tests
+        run: python -m compileall -q coach.py desktop_ui.py qt_widgets.py observer.py engine.py local_ocr.py session.py advice.py providers.py observation.py icon_matcher.py scripts tests
+      - name: Run unit and regression tests, including Qt offscreen smoke
         run: python -m unittest discover -s tests -v
       - name: Dependency consistency
         run: python -m pip check
