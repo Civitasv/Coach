@@ -18,13 +18,14 @@ The repository is the source of truth. Each substantial feature uses a shared nu
 ## Validation commands
 
 ```bash
-python -m pip install -r requirements.txt
-python scripts/verify_ai_workflow.py
-python -m compileall -q coach.py engine.py local_ocr.py session.py advice.py providers.py scripts tests
-python -m unittest discover -s tests -v
+./run.sh --prepare  # Windows: run.bat --prepare
+.venv/bin/python scripts/verify_ai_workflow.py  # Windows: .venv/Scripts/python.exe
+.venv/bin/python -m compileall -q coach.py desktop_ui.py qt_widgets.py observer.py engine.py local_ocr.py session.py advice.py providers.py observation.py icon_matcher.py scripts tests
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pip check
 ```
 
-CI runs these on Ubuntu and Windows (Python 3.11). Real Windows gameplay QA and OCR accuracy against real client screenshots are **manual evidence requirements**; passing mocks is not evidence of actual recognition accuracy.
+CI creates .venv through scripts/bootstrap.py, then runs these commands with that venv's Python on Ubuntu and Windows (Python 3.11). Real Windows gameplay QA and OCR accuracy against real client screenshots are **manual evidence requirements**; passing mocks is not evidence of actual recognition accuracy.
 
 ## Evidence rubric
 
