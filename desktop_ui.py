@@ -10,9 +10,10 @@ from pathlib import Path
 
 import mss
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFrame, QGridLayout,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListView, QMainWindow, QMessageBox,
     QPushButton, QScrollArea, QSpinBox, QDoubleSpinBox, QSplitter,
     QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
@@ -56,6 +57,20 @@ QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QTextEdit {
  background: #FFFFFF; color: #243044; border: 1px solid #DFE5EE;
  border-radius: 9px; padding: 7px; selection-background-color: #DBE9FF;
 }
+/* The expanded QComboBox popup has its own item view and can inherit a dark
+   Windows palette even when the closed field has a light background. */
+QComboBox { background-color: #FFFFFF; color: #243044;
+ selection-background-color: #E8F1FF; selection-color: #243044;
+ padding-right: 24px; }
+QComboBox:disabled { background-color: #F3F5F8; color: #6D7889; }
+QComboBox::drop-down { background-color: #FFFFFF; border: none; width: 23px;
+ border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+QComboBox QAbstractItemView { background-color: #FFFFFF; color: #243044;
+ border: 1px solid #DFE5EE; selection-background-color: #E8F1FF;
+ selection-color: #193457; outline: 0; }
+QComboBox QAbstractItemView::item { min-height: 28px; padding: 5px 8px; }
+QComboBox QAbstractItemView::item:selected { background-color: #E8F1FF;
+ color: #193457; }
 QLineEdit:focus, QTextEdit:focus { border: 1px solid #71A6F1; }
 QTextEdit#Composer { border-radius: 12px; }
 QTextEdit#OCRText { background: #FAFBFD; border: none; color: #647187; font-family: Consolas; }
@@ -64,6 +79,44 @@ QScrollBar::handle:vertical { background: #D7DDE6; min-height: 40px; border-radi
 QSplitter::handle { background: #F5F6F8; width: 12px; }
 QCheckBox { color: #586A80; }
 """
+
+
+def themed_combo():
+    """A light-themed combo with an explicitly themed popup on dark systems.
+
+    QComboBox uses a separate QListView for its menu; styling the collapsed
+    control alone leaves dropdown item text dependent on the OS palette.
+    The explicit per-widget palette also covers platforms where a popup is
+    rendered by a different style path from the parent stylesheet.
+    """
+    combo = QComboBox()
+    view = QListView(combo)
+    combo.setView(view)
+
+    for widget, fg, bg in ((combo, '#243044', '#FFFFFF'),
+                            (view, '#243044', '#FFFFFF')):
+        palette = widget.palette()
+        for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
+            for role in (QPalette.ColorRole.Text, QPalette.ColorRole.WindowText,
+                         QPalette.ColorRole.ButtonText):
+                palette.setColor(group, role, QColor(fg))
+            for role in (QPalette.ColorRole.Base, QPalette.ColorRole.Window,
+                         QPalette.ColorRole.Button):
+                palette.setColor(group, role, QColor(bg))
+            palette.setColor(group, QPalette.ColorRole.Highlight, QColor('#E8F1FF'))
+            palette.setColor(group, QPalette.ColorRole.HighlightedText, QColor('#193457'))
+        widget.setPalette(palette)
+
+    # QListView may be realized in a popup container with a different native
+    # palette than the app's main window (notably Windows dark mode).
+    view.setStyleSheet(
+        'QListView { background-color: #FFFFFF; color: #243044;'
+        ' selection-background-color: #E8F1FF; selection-color: #193457;'
+        ' border: 1px solid #DFE5EE; outline: none; }'
+        'QListView::item { min-height: 28px; padding: 5px 8px; }'
+        'QListView::item:selected { background: #E8F1FF; color: #193457; }'
+    )
+    return combo
 
 
 def title(text, name='Heading'):
@@ -189,14 +242,14 @@ class CoachWindow(QMainWindow):
         self.settings = frame_panel(name='Settings')
         settings = vertical(self.settings, (16, 12, 16, 12), 9)
         line1 = horizontal(spacing=9)
-        self.monitor_combo = QComboBox()
+        self.monitor_combo = themed_combo()
         self.monitor_combo.setMinimumWidth(210)
         line1.addWidget(title('显示器', 'Muted'))
         line1.addWidget(self.monitor_combo)
         line1.addWidget(button('刷新', self.refresh_monitors))
         line1.addSpacing(12)
         line1.addWidget(title('模型', 'Muted'))
-        self.provider = QComboBox()
+        self.provider = themed_combo()
         self.provider.addItems(PROVIDERS)
         self.provider.currentTextChanged.connect(self.provider_changed)
         line1.addWidget(self.provider)
@@ -237,14 +290,14 @@ class CoachWindow(QMainWindow):
         settings.addLayout(line2)
         line3 = horizontal(spacing=9)
         line3.addWidget(title('扫描类型', 'Muted'))
-        self.mode = QComboBox()
+        self.mode = themed_combo()
         self.mode.addItems(MODES)
         line3.addWidget(self.mode)
         self.vision_btn = button('深度看图一次（单独授权）', self.vision_once)
         line3.addWidget(self.vision_btn)
         line3.addSpacing(12)
         line3.addWidget(title('校准', 'Muted'))
-        self.roi_combo = QComboBox()
+        self.roi_combo = themed_combo()
         self.roi_combo.addItems(sorted(ROI_NAMES))
         line3.addWidget(self.roi_combo)
         line3.addWidget(button('框选 ROI', self.pick_roi))
