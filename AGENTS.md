@@ -28,6 +28,8 @@ Read `.agents/skills/ub-mode/SKILL.md` for `ub-mode` engineering practices on no
 
 ## Architectural invariants
 
+0. **Isolated startup:** all Python dependencies must be installed in the repository-owned `.venv`, never into global/site Python. Windows `run.bat`, Unix `run.sh`, and CI must all use `scripts/bootstrap.py`; don't introduce competing bootstrap paths.
+
 1. **Observation is not truth:** a low-confidence OCR line or model guess cannot overwrite a confirmed match fact. Store provenance and freshness/TTL, separate *observed*, *inferred*, *user-confirmed*, and *unknown*.
 2. **Per-game isolation:** each Start initializes fresh state; End stops observation and invalidates in-flight results. A late callback must not contaminate a new match.
 3. **Local-first/consent:** screenshot capture is local by default. Cloud **text** and cloud **image** transmission require separate opt-in. Do not persist secrets or raw screenshots by default.
@@ -47,6 +49,7 @@ Read `.agents/skills/ub-mode/SKILL.md` for `ub-mode` engineering practices on no
 | Decision logic | `advice.py` | deterministic advice/risk boundary and missing-information tests |
 | External APIs | `providers.py` | mocked payload, explicit consent path, no unintended uploads |
 | Workflow | `scripts/verify_ai_workflow.py` | repository checks + script regression tests |
+| Startup | `run.bat`, `run.sh`, `scripts/bootstrap.py` | first-run, idempotent reuse, failed install, dependency repair tests |
 
 ## Definition of done
 

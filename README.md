@@ -2,16 +2,24 @@
 
 Windows 桌面只读辅助，采用 **PySide6 双栏 UI**：左侧持续显示游戏截图与可信 HUD/商店牌，右侧为聊天式教练。截图在本机采集；**默认不会自动发送到云端**。
 
-## 启动
+## 启动：项目自管理 .venv
 
-Python 3.11+。Windows 双击 `run.bat`，或：
+安装 **Python 3.11+**，随后直接启动即可（无需提前手动安装 pip 依赖）：
+
+- **Windows**：双击 `run.bat`（也可在 PowerShell 中运行 `.\\run.bat`）。
+- **macOS / Linux**：运行 `./run.sh`。
+
+启动器用系统 Python 的标准库在**仓库目录**创建 `.venv/`，只通过 `.venv` 的 Python 安装 `requirements.txt`，最后使用相同的 venv Python 启动 `coach.py`。**不会安装包到全局 Python。** 首次需要联网下载 PySide6、RapidOCR 和 ONNX Runtime，之后检测到依赖清单和 Python 版本没有变化且包仍在时直接复用。修改 requirements 或缺包会自动补装。
+
+需要只准备环境、不打开窗口时：
 
 ```powershell
-python -m pip install -r requirements.txt
-python coach.py
+.\\run.bat --prepare
 ```
 
-首次安装 PySide6/RapidOCR/ONNX Runtime 需要下载依赖。普通监看无需 API Key。
+macOS/Linux 对应 `./run.sh --prepare`；手动运行可使用 `.venv/Scripts/python.exe coach.py`（Windows）或 `.venv/bin/python coach.py`（macOS/Linux）。可用 `COACH_PYTHON` 指定创建 venv 所用的宿主 Python。
+
+如果 Python 版本更新导致已有 venv 损坏，删除项目下的 `.venv/` 再运行启动器。**项目自管理不等于打包 Python 运行时或完全离线安装**；普通本地监看不需要 API Key。
 
 ## 每局操作
 
