@@ -777,6 +777,11 @@ class CoachWindow(QMainWindow):
                     if msg != self.ocr_error_notice:
                         self.append_message('system', '本地 OCR 异常：' + msg + '\\n画面捕获仍在运行；可直接尝试「立即获取建议」。')
                         self.ocr_error_notice = msg
+                        # A player who opted into AI should still get a
+                        # missing-information question when local OCR fails.
+                        if not self.ocr_empty_notice:
+                            self.ocr_empty_notice = True
+                            self.maybe_model(force=True)
                     continue
                 if kind == 'error':
                     self.pause_observer()
