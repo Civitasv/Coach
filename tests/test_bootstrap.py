@@ -22,14 +22,14 @@ class BootstrapTests(unittest.TestCase):
         self.bootstrap = load_bootstrap()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         (self.root / 'requirements.txt').write_text('Pillow>=10,<13\nmss>=9,<11\n', encoding='utf-8')
         self.python = self.bootstrap.venv_python(self.root / '.venv', 'nt' if self.bootstrap.os.name == 'nt' else 'posix')
 
     def fake_runner(self, commands):
         def run(args, **kwargs):
             commands.append(list(map(str, args)))
-            if args[1:4] == ['-m', 'venv', str(self.root / '.venv')]:
+            if args[1:3] == ['-m', 'venv']:
                 self.python.parent.mkdir(parents=True, exist_ok=True)
                 self.python.touch()
             elif args[1:3] == ['-c', self.bootstrap.VERSION_PROBE]:
