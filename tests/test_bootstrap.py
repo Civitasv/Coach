@@ -1,5 +1,6 @@
 """Bootstrap tests use fake runners; never install packages or open the GUI."""
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -107,6 +108,13 @@ class BootstrapTests(unittest.TestCase):
              mock.patch.object(self.bootstrap.subprocess, 'run') as call:
             self.assertEqual(self.bootstrap.main(['--prepare']), 0)
             call.assert_not_called()
+
+    def test_bootstrap_messages_support_cp1252_console(self):
+        commands = []
+        output = io.TextIOWrapper(io.BytesIO(), encoding='cp1252', write_through=True)
+        with mock.patch.object(self.bootstrap.subprocess, 'run', side_effect=self.fake_runner(commands)), \
+             mock.patch.object(self.bootstrap.sys, 'stdout', output):
+            self.bootstrap.ensure_environment(self.root)
 
     def test_venv_python_paths_are_platform_specific(self):
         p = Path('/project/.venv')

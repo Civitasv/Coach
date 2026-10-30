@@ -56,26 +56,26 @@ def probe(exe: Path, code: str, *args):
 def ensure_environment(root=ROOT):
     """Prepare an isolated environment; reuse a healthy install on subsequent runs."""
     if sys.version_info < (3, 11):
-        raise BootstrapError('Coach 需要 Python 3.11 或更新版本。')
+        raise BootstrapError('Coach requires Python 3.11 or newer.')
     root = Path(root).resolve()
     requirements = root / 'requirements.txt'
     if not requirements.is_file():
-        raise BootstrapError(f'找不到项目依赖清单：{requirements}')
+        raise BootstrapError(f'Missing requirements file: {requirements}')
 
     folder = root / '.venv'
     python = venv_python(folder)
     if not python.is_file():
-        print('[Coach] 创建项目虚拟环境 .venv ...', flush=True)
+        print('[Coach] Creating project-local .venv ...', flush=True)
         try:
             subprocess.run([sys.executable, '-m', 'venv', str(folder)], check=True, cwd=root)
         except (subprocess.CalledProcessError, OSError) as exc:
-            raise BootstrapError('创建 .venv 失败；请检查系统 Python 的 venv/ensurepip 支持。') from exc
+            raise BootstrapError('Cannot create .venv. Ensure host Python supports venv and ensurepip.') from exc
         if not python.is_file():
-            raise BootstrapError('创建 .venv 后找不到 Python 可执行文件；请删除 .venv 再试。')
+            raise BootstrapError('Venv Python missing after setup. Remove .venv and retry.')
 
     version = probe(python, VERSION_PROBE)
     if version.returncode or version.stdout.strip() != runtime_fingerprint():
-        raise BootstrapError('现有 .venv 不可用或 Python 版本已变更；请删除项目中的 .venv 后重试。')
+        raise BootstrapError('Existing .venv is broken or uses another Python version. Remove .venv and retry.')
 
     digest = hashlib.sha256(requirements.read_bytes()).hexdigest()
     signature = {'requirements_sha256': digest, 'python': runtime_fingerprint()}
@@ -86,21 +86,21 @@ def ensure_environment(root=ROOT):
         saved = None
     ready = saved == signature and probe(python, DIST_PROBE, requirements).returncode == 0
     if not ready:
-        print('[Coach] 在 .venv 中安装或修复依赖（首次运行需要联网）...', flush=True)
+        print('[Coach] Installing or repairing .venv dependencies (first run requires internet) ...', flush=True)
         try:
             subprocess.run([str(python), '-m', 'pip', 'install', '--disable-pip-version-check',
                             '--no-input', '-r', str(requirements)], check=True, cwd=root)
         except (subprocess.CalledProcessError, OSError) as exc:
             stamp.unlink(missing_ok=True)
-            raise BootstrapError('依赖安装失败；已保留 .venv，下次启动会重试。请检查网络及 pip 日志。') from exc
+            raise BootstrapError('Dependency installation failed. The .venv was kept; retry after checking network and pip output.') from exc
         if probe(python, DIST_PROBE, requirements).returncode:
             stamp.unlink(missing_ok=True)
-            raise BootstrapError('依赖安装后仍有包缺失；请检查 requirements.txt 或删除 .venv 重试。')
+            raise BootstrapError('Dependencies remain missing. Check requirements.txt or remove .venv and retry.')
         temp = folder / (STAMP_NAME + '.tmp')
         temp.write_text(json.dumps(signature, sort_keys=True), encoding='utf-8')
         temp.replace(stamp)
     else:
-        print('[Coach] 复用已安装的 .venv 依赖。', flush=True)
+        print('[Coach] Reusing installed .venv dependencies.', flush=True)
     return python
 
 
@@ -111,7 +111,7 @@ def main(argv=None):
     try:
         python = ensure_environment(ROOT)
         if options.prepare:
-            print(f'[Coach] 环境已就绪：{python}')
+            print(f'[Coach] Environment ready: {python}')
             return 0
         return subprocess.run([str(python), str(ROOT / 'coach.py')], cwd=ROOT, check=False).returncode
     except BootstrapError as exc:
