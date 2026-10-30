@@ -144,10 +144,15 @@ class CoachWindow(QMainWindow):
         self.last_text_at = 0
         self.shown_question = ''
         self.latest_frame = None
+        self.ocr_empty_notice = False
+        self.ocr_error_notice = ''
         self.messages = []
         self.build_ui()
         self.refresh_monitors()
-        self.append_message('assistant', '先选择监看区域，然后点击「开始本局」。左边持续显示画面和可信识别结果，右边可以直接追问。')
+        self.append_message('assistant',
+            '先框选游戏区域并开始本局。配置 API Key 不会自动调用模型；'
+            '点击顶部「立即获取建议」，或展开设置并启用「自动建议」才能发起调用。'
+            'OCR 看不到关键数据时，我会明确问你。')
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.drain)
         self.timer.start(130)
@@ -169,6 +174,8 @@ class CoachWindow(QMainWindow):
         head.addWidget(self.settings_btn)
         self.pick_btn = button('框选游戏区域', self.pick)
         head.addWidget(self.pick_btn)
+        self.advise_btn = button('立即获取建议', self.advise_once)
+        head.addWidget(self.advise_btn)
         self.start_btn = button('开始本局', self.start_game, 'PrimaryButton')
         head.addWidget(self.start_btn)
         self.pause_btn = button('暂停', self.toggle_pause)
@@ -512,6 +519,8 @@ class CoachWindow(QMainWindow):
         self.last_fingerprint = ''
         self.last_text_at = 0
         self.shown_question = ''
+        self.ocr_empty_notice = False
+        self.ocr_error_notice = ''
         self.messages = []
         self.chat.clear_messages()
         self.preview.set_image(None)
@@ -636,12 +645,24 @@ class CoachWindow(QMainWindow):
             return
         self.launch_model('chat', question=text)
 
+    def advise_once(self):
+        """Manually request one text-only decision regardless of OCR availability."""
+        if self.session.phase != 'active':
+            QMessageBox.information(self, '先开始对局', '请先框选画面并点击「开始本局」。')
+            return
+        if self.model_busy:
+            self.append_message('system', '上一次建议还在生成中。')
+            return
+        self.launch_model('text')
+
     def maybe_model(self, force=False):
         if self.session.phase != 'active' or self.model_busy or not self.auto_text.isChecked():
             return
         if not self.cloud_text_allowed or self.session.counts['model'] >= self.call_limit.value():
             return
-        if len(self.session.latest_ocr.strip()) < 5 and not force:
+        # Empty OCR is not a reason to suppress AI forever. The model must
+        # explicitly ask for critical missing facts instead of inventing them.
+        if self.session.counts['ocr'] < 1 and not force:
             return
         icons = sorted((k,v['name']) for k,v in self.session.fresh_icons().items())
         fingerprint = (self.session.latest_ocr, tuple(icons), tuple((k,self.session.current(k)) for k in LABELS))
@@ -702,7 +723,15 @@ class CoachWindow(QMainWindow):
                     result = analyze(provider, jpeg(grab(rect)), request_prompt, model, key)
                 else:
                     result = analyze_text(provider, request_prompt, model, key)
-                self.model_results.put((run, epoch, 'model', (kind, mode, parse(result))))
+                parsed = parse(result)
+                if kind != 'vision' and not parsed:
+                    if str(result).strip():
+                        parsed = {'action': str(result).strip()[:850],
+                                  'confidence': 'low',
+                                  'risk': '模型输出未遵循约定格式；仅作为未经结构化验证的文字参考。'}
+                    else:
+                        raise RuntimeError('模型返回空文本。请检查模型名称和 API 配额。')
+                self.model_results.put((run, epoch, 'model', (kind, mode, parsed)))
             except Exception as exc:
                 self.model_results.put((run, epoch, 'error', str(exc)))
         threading.Thread(target=work, daemon=True, name='CoachLLM').start()
@@ -739,6 +768,16 @@ class CoachWindow(QMainWindow):
                     break
                 if self.session.phase != 'active':
                     break
+                if kind == 'ocr_status':
+                    self.status.setText('本地 OCR 模型初始化中；屏幕预览仍继续更新。')
+                    continue
+                if kind == 'ocr_error':
+                    msg = short(payload, 220)
+                    self.status.setText('OCR 失败：' + msg + ' · 仍可点击「立即获取建议」')
+                    if msg != self.ocr_error_notice:
+                        self.append_message('system', '本地 OCR 异常：' + msg + '\\n画面捕获仍在运行；可直接尝试「立即获取建议」。')
+                        self.ocr_error_notice = msg
+                    continue
                 if kind == 'error':
                     self.pause_observer()
                     self.append_message('system','本地识别停止：'+short(payload, 250))
@@ -746,7 +785,15 @@ class CoachWindow(QMainWindow):
                 lines, scoped, icons = payload
                 self.session.observe(lines, scoped=scoped)
                 self.session.record_icons(icons)
-                self.ocr_view.setPlainText(self.session.latest_ocr or '暂无文字')
+                self.ocr_view.setPlainText(
+                    self.session.latest_ocr or
+                    f'本次 OCR 返回 {len(lines)} 行，可信文字 0 行。请检查框选区域、游戏窗口模式和文字大小。'
+                )
+                if not self.session.latest_ocr and not self.ocr_empty_notice:
+                    self.ocr_empty_notice = True
+                    self.append_message('system',
+                        '本地 OCR 暂时没有可靠文字。可在「设置与校准」内框选血量、能量等具体区域，'
+                        '或先点「立即获取建议」验证 AI。商店英雄头像需要单独的图标模板，OCR 无法直接读出。')
                 if self.session.pending in ('health','energy','weapon','opponent') and self.session.current(self.session.pending) is not None:
                     self.session.skip_question()
                     self.reset_question()
@@ -754,6 +801,12 @@ class CoachWindow(QMainWindow):
                 if question:
                     self.show_question(*question)
                 self.maybe_model()
+                if not lines:
+                    self.status.setText('OCR 本轮未识别到文字 · 请校准 HUD 或点击「立即获取建议」')
+                else:
+                    self.status.setText(
+                        f'OCR 本轮 {len(lines)} 行 / 可信 {len(self.session.latest_ocr.splitlines())} 行'
+                    )
             self.refresh_state()
         while True:
             try:
