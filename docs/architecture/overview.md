@@ -1,56 +1,42 @@
 # Architecture — Coach
 
-## Goal
+## Product intent
 
-Read-only local-first gameplay coaching, with predictable latency and bounded cloud cost. The user clicks **Start** at the beginning of each match and **End** when it finishes. AI can suggest actions but does not interact with the game.
+Windows-first, local-first **read-only** gameplay coach. PySide6 shell presents a live captured viewport and a persistent two-way chat within a match. Users explicitly click Start, Pause, End.
 
 ## Data flow
 
 ```text
-Selected screen ROI
-  → local capture / image-change gate (coach.py)
-  → local OCR (local_ocr.py)
-  → evidence-aware per-game facts + TTL (session.py)
-  → deterministic alerts / missing-field questions (advice.py)
-  → optional throttled text LLM (providers.py)
-  → non-modal Tk display (coach.py)
-
-Manual opt-in image LLM → confirmed screenshot analysis
-                          → cautious pool/opponent snapshots (engine.py)
+User-selected rectangle → Observer (mss capture, single latest frame)
+    → local RapidOCR / strict local IconMatcher / calibrated ROIs
+    → bounded OCR event queue → desktop_ui.py on Qt main thread
+    → GameSession / FactLedger / Match (trusted + expiring state)
+    → left preview overlay and compact facts
+    → advice.py deterministic hints / missing-fact question card
+    → optional consented text provider requests → right conversation timeline
+Manual screenshot confirmation → optional image provider analysis
 ```
 
-## Boundaries
+## Dependency map
 
-- `coach.py`: UI, pacing, lifecycle ownership, background worker orchestration, request authorization, event queue. Tk widgets must be mutated only on UI thread.
-- `local_ocr.py`: implementation detail behind OCR line/region interfaces. Recognition errors are normal and must be represented explicitly.
-- `session.py`: per-game lifecycle and fresh/expired facts; must remain usable without cloud credentials.
-- `engine.py`: shared pool/opponent snapshots; only high-confidence confirmed scans mutate exact counts.
-- `advice.py`: deterministic guidance and model prompt construction; may not fabricate board state.
-- `providers.py`: isolated external-service requests. Must not initiate cloud calls without UI authorization.
+- `coach.py`: entrypoint only.
+- `desktop_ui.py`: PySide6 coordinator; single writer to GameSession, API permission prompts and per-game model-epoch guards.
+- `qt_widgets.py`: presentational preview and chat; must not initiate game capture/cloud calls.
+- `observer.py`: local worker; captures one frame into one slot, deduplicates for OCR, capped event queue, no model API.
+- `local_ocr.py`/`icon_matcher.py`: local OCR and abstaining icon matcher.
+- `observation.py`/`session.py`/`engine.py`: source, confidence, expiry and match state (no Qt).
+- `advice.py`: safe text prompts/offline hints. `providers.py`: explicit cloud/model boundary.
 
-## Invariants / non-goals
+## Invariants
 
-1. Screenshots and API credentials are not stored by default. Match summaries are local, so their privacy implications should be documented.
-2. `idle → active → ended` is explicit; all in-flight work carries a generation/run ID and may be discarded.
-3. OCR field extraction is conservative. Facts carry provenance and TTL; stale facts may be shown only with freshness labels.
-4. High-frequency observation and slow LLM decisions must remain separate to control latency and cost.
-5. An OCR-only path cannot reliably identify icon-only cards, heroes, weapons, or positioning. Future ROI calibration and visual classifiers require a separate spec and evidence.
-6. No memory reading, network interception, input automation, or gameplay bypass.
+1. Render only confirmed facts; expired evidence is "未知"; uncalibrated icon slots cannot be guessed from generic OCR words.
+2. `idle → active → ended` is explicit. `run_id` gates OCR/model work and separate `model_epoch` rejects old responses following provider change or pause.
+3. Cloud text and cloud image transmission require separate user permission. The automatic observer has no outbound network calls.
+4. Screenshot frames are not persisted by default, and a single-slot buffer prevents preview backlog. Per-match summaries are stored locally without API secrets or screenshots.
+5. UI updates happen only on the Qt GUI thread; worker threads write into queues / single-frame buffer.
+6. Never read game memory, intercept packets, automate gameplay or bypass client protections.
+7. GUI smoke tests in Qt offscreen do not prove performance or game-specific OCR fidelity on Windows.
 
-## Evolution seams
+## Planned follow-up
 
-- Calibrated HUD/ROI segmentation (test on real, sanitized sample screenshots).
-- Hero/equipment icon classification with confidence and unknown class.
-- Explicit user-corrected enemy board and remaining-pool model.
-- Decision policy with deterministic legality checks and uncertainty-aware questions.
-- Per-match metrics for OCR success, inference latency, model calls, and stale-data incidents.
-
-Every change affecting fact contracts, network privacy, session epochs, or decision behavior requires a spec and regression tests.
-
-## Spec 002 structured observation slice
-
-- `observation.py` is the pure ROI/FactLedger boundary: normalized ROIs, schema validation, atomic local config, TTL facts and conflict invalidation. No game/network/Tk APIs.
-- `local_ocr.py` restores OCR boxes to original game-crop coordinates after image downscaling. `scoped_lines` assigns those boxes to calibrated regions. If a HUD ROI has not been calibrated, current conservative full-crop label matching remains as fallback.
-- `icon_matcher.py` performs single-icon crop matching only against human-confirmed local templates. Strong score and runner-up margin required; ambiguous output is unknown. Output is a time-limited fragment, not a reconstructed lineup.
-- `coach.py` captures a calibration snapshot when the per-game read-only observer starts, then posts OCR+matched-icon results to the Tk event queue. UI thread alone mutates session state; pause/end invalidates late events as before.
-- Benchmark harness consumes privately held, sanitized labeled game captures. The absence of captures is never recorded as real-world passing evidence.
+Sanitized Windows gameplay fixtures for calibration and recognition accuracy; hero icon training; session-scoped enemy lineup and pool correctness; accessibility keyboard shortcuts and HiDPI manual QA.

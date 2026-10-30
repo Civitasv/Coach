@@ -1,6 +1,6 @@
 # Coach Agent Collaboration Contract
 
-Coach is a **local-first, read-only, real-time gameplay adviser** for 王者万象棋. The current runtime is a Python/Tkinter desktop app; local OCR feeds a per-game state machine, and optional LLM providers offer advice. Humans remain responsible for game actions.
+Coach is a **local-first, read-only, real-time gameplay adviser** for 王者万象棋. The current runtime is a PySide6 desktop app; local OCR feeds a per-game state machine, and optional LLM providers offer advice. Humans remain responsible for game actions.
 
 ## Start here (fresh context, every task)
 
@@ -34,14 +34,14 @@ Read `.agents/skills/ub-mode/SKILL.md` for `ub-mode` engineering practices on no
 4. **No hidden access/actions:** never read game memory, inspect packets, automate input, evade anti-cheat, or imply that AI operates the game.
 5. **Cost and latency budgets:** a fast deterministic observation loop must not trigger an LLM request for every frame. Respect throttles, user authorization, and per-match request caps.
 6. **Match data:** exact public-pool counts only come from clearly readable confirmed panels (or explicit user corrections), not deduction from opponents. Opponent information expires.
-7. **UI thread safety:** worker threads cannot directly update Tk widgets; use event queues and run/session IDs.
+7. **UI thread safety:** worker threads cannot directly update Qt widgets; use event queues and run/session IDs.
 8. **User questions:** ask only for information that materially affects action; prompts must be non-modal and suppress duplicates.
 
 ## Ownership and test map
 
 | Boundary | Files | Minimum tests |
 | --- | --- | --- |
-| Capture and UI lifecycle | `coach.py` | thread/session invalidation and GUI smoke where possible |
+| Capture and UI lifecycle | `coach.py`, `desktop_ui.py`, `qt_widgets.py`, `observer.py` | thread/session invalidation and GUI smoke where possible |
 | OCR adapter | `local_ocr.py` | OCR normalization and uncertainty tests; screenshots only when sanitized |
 | Fact/session model | `session.py`, `engine.py` | fact TTL, snapshots, Start/End, absent/contradictory data |
 | Decision logic | `advice.py` | deterministic advice/risk boundary and missing-information tests |

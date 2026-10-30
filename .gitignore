@@ -5,7 +5,4 @@ sessions/
 *.log
 .env
 
-# Private local calibration, labeled screenshots and model templates
 config/
-fixtures/private/
-fixtures/manifest.json
