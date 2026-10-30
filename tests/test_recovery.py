@@ -107,7 +107,13 @@ class DesktopRecoveryTests(unittest.TestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
         self.window = CoachWindow(session_dir=self.folder.name)
-        self.addCleanup(self.window.close)
+        self.addCleanup(self.cleanup_window)
+
+    def cleanup_window(self):
+        if self.window.session.phase == 'active':
+            self.window.session.end()
+        self.window.observer = None
+        self.window.close()
 
     def test_manual_advice_visible_and_works_with_empty_ocr(self):
         self.assertIsNotNone(self.window.advise_btn)
